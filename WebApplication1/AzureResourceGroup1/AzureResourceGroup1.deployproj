@@ -55,5 +55,20 @@
       <Visible>False</Visible>
     </Content>
   </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\UnitTestProject1\UnitTestProject1.csproj">
+      <Targets>
+      </Targets>
+      <AdditionalProperties>
+      </AdditionalProperties>
+      <IncludeFilePath>
+      </IncludeFilePath>
+    </ProjectReference>
+    <ProjectReference Include="..\WebApplication1\WebApplication1.csproj">
+      <Targets>Build;Package</Targets>
+      <AdditionalProperties>PackageLocation=..\AzureResourceGroup1\$(ProjectReferencesOutputPath)\WebApplication1\package.zip</AdditionalProperties>
+      <IncludeFilePath>$(ProjectReferencesOutputPath)\WebApplication1\package.zip</IncludeFilePath>
+    </ProjectReference>
+  </ItemGroup>
   <Target Name="GetReferenceAssemblyPaths" />
 </Project>
