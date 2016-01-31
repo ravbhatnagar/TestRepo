@@ -16,4 +16,4 @@ $storageAccountKey = (Get-AzureRmStorageAccountKey -ResourceGroupName ravAzureRG
 $storageCtx = (Get-AzureRmStorageAccount -ResourceGroupName ravAzureRG1 -Name ravwdstorage2).Context
 $sasToken = New-AzureStorageContainerSASToken -Container "packages" -Context $storageCtx -Permission r
 $sasToken = ConvertTo-SecureString $sasToken -AsPlainText -Force
-New-AzureRmResourceGroupDeployment -Name ravcddep -hostingPlanName ravhp4444 -TemplateFile "C:\Projects\AzureResourceGroup6\AzureResourceGroup6\Templates\WebSite.json" -ResourceGroupName ravAzureRG1 -_artifactsLocationSasToken $sasToken -_artifactsLocation https://ravwdstorage2.blob.core.windows.net/packages/WebApplication1.zip
+New-AzureRmResourceGroupDeployment -Name ravcddep -hostingPlanName ravhp4444 -TemplateFile "C:\Program Files (x86)\Jenkins\jobs\ravTestProj1\workspace\WebApplication1\AzureResourceGroup1\Templates\WebSite.json" -ResourceGroupName ravAzureRG1 -_artifactsLocationSasToken $sasToken -_artifactsLocation https://ravwdstorage2.blob.core.windows.net/packages/WebApplication1.zip
