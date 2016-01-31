@@ -1,103 +1,19 @@
-﻿#Requires -Version 3.0
-#Requires -Module AzureRM.Resources
-#Requires -Module Azure.Storage
+﻿$password = "P@ssW0rd1"
+$certPath = "C:\certificates\examplecert4.pfx"
 
-Param(
-    [string] [Parameter(Mandatory=$true)] $ResourceGroupLocation,
-    [string] $ResourceGroupName = 'WebApplication1',
-    [switch] $UploadArtifacts,
-    [string] $StorageAccountName,
-    [string] $StorageAccountResourceGroupName, 
-    [string] $StorageContainerName = $ResourceGroupName.ToLowerInvariant() + '-stageartifacts',
-    [string] $TemplateFile = '..\Templates\WebSite.json',
-    [string] $TemplateParametersFile = '..\Templates\WebSite.parameters.json',
-    [string] $ArtifactStagingDirectory = '..\bin\Debug\staging',
-    [string] $AzCopyPath = '..\Tools\AzCopy.exe',
-    [string] $DSCSourceFolder = '..\DSC'
-)
+$securePassword = ConvertTo-SecureString -String $password -Force -AsPlainText
+$cert1 = Import-PfxCertificate -FilePath $certPath cert:\LocalMachine\My -Password $securePassword
 
-Import-Module Azure -ErrorAction SilentlyContinue
+$keyValue = [System.Convert]::ToBase64String($cert1.GetRawCertData())
 
-try {
-    [Microsoft.Azure.Common.Authentication.AzureSession]::ClientFactory.AddUserAgent("VSAzureTools-$UI$($host.name)".replace(" ","_"), "2.8")
-} catch { }
+Add-Type -Path 'C:\Program Files (x86)\Microsoft SDKs\Azure\PowerShell\ResourceManager\AzureResourceManager\AzureRM.Resources\Microsoft.Azure.Commands.Resources.dll'
 
-Set-StrictMode -Version 3
+Login-AzureRmAccount -TenantId 72f988bf-86f1-41af-91ab-2d7cd011db47 -ServicePrincipal -CertificateThumbprint $cert1.Thumbprint -ApplicationId 4d1165d0-08a3-444d-9863-8a0b9b75ffd6
 
-$OptionalParameters = New-Object -TypeName Hashtable
-$TemplateFile = [System.IO.Path]::Combine($PSScriptRoot, $TemplateFile)
-$TemplateParametersFile = [System.IO.Path]::Combine($PSScriptRoot, $TemplateParametersFile)
+Set-AzureStorageBlobContent -Context (Get-AzureRmStorageAccount -ResourceGroupName ravAzureRG1 -Name ravwdstorage2).Context -Container packages -File 'C:\Program Files (x86)\Jenkins\jobs\ravTestProj1\workspace\WebApplication1\WebApplication1\obj\Debug\Package\WebApplication1.zip' -Force
 
-if ($UploadArtifacts) {
-    # Convert relative paths to absolute paths if needed
-    $AzCopyPath = [System.IO.Path]::Combine($PSScriptRoot, $AzCopyPath)
-    $ArtifactStagingDirectory = [System.IO.Path]::Combine($PSScriptRoot, $ArtifactStagingDirectory)
-    $DSCSourceFolder = [System.IO.Path]::Combine($PSScriptRoot, $DSCSourceFolder)
-
-    Set-Variable ArtifactsLocationName '_artifactsLocation' -Option ReadOnly -Force
-    Set-Variable ArtifactsLocationSasTokenName '_artifactsLocationSasToken' -Option ReadOnly -Force
-
-    $OptionalParameters.Add($ArtifactsLocationName, $null)
-    $OptionalParameters.Add($ArtifactsLocationSasTokenName, $null)
-
-    # Parse the parameter file and update the values of artifacts location and artifacts location SAS token if they are present
-    $JsonContent = Get-Content $TemplateParametersFile -Raw | ConvertFrom-Json
-    $JsonParameters = $JsonContent | Get-Member -Type NoteProperty | Where-Object {$_.Name -eq "parameters"}
-
-    if ($JsonParameters -eq $null) {
-        $JsonParameters = $JsonContent
-    }
-    else {
-        $JsonParameters = $JsonContent.parameters
-    }
-
-    $JsonParameters | Get-Member -Type NoteProperty | ForEach-Object {
-        $ParameterValue = $JsonParameters | Select-Object -ExpandProperty $_.Name
-
-        if ($_.Name -eq $ArtifactsLocationName -or $_.Name -eq $ArtifactsLocationSasTokenName) {
-            $OptionalParameters[$_.Name] = $ParameterValue.value
-        }
-    }
-
-    $StorageAccountKey = (Get-AzureRmStorageAccountKey -ResourceGroupName $StorageAccountResourceGroupName -Name $StorageAccountName).Key1
-
-    $StorageAccountContext = (Get-AzureRmStorageAccount -ResourceGroupName $StorageAccountResourceGroupName -Name $StorageAccountName).Context
-
-    # Create DSC configuration archive
-    if (Test-Path $DSCSourceFolder) {
-        Add-Type -Assembly System.IO.Compression.FileSystem
-        $ArchiveFile = Join-Path $ArtifactStagingDirectory "dsc.zip"
-        Remove-Item -Path $ArchiveFile -ErrorAction SilentlyContinue
-        [System.IO.Compression.ZipFile]::CreateFromDirectory($DSCSourceFolder, $ArchiveFile)
-    }
-
-    # Generate the value for artifacts location if it is not provided in the parameter file
-    $ArtifactsLocation = $OptionalParameters[$ArtifactsLocationName]
-    if ($ArtifactsLocation -eq $null) {
-        $ArtifactsLocation = $StorageAccountContext.BlobEndPoint + $StorageContainerName
-        $OptionalParameters[$ArtifactsLocationName] = $ArtifactsLocation
-    }
-
-    # Use AzCopy to copy files from the local storage drop path to the storage account container
-    & $AzCopyPath """$ArtifactStagingDirectory""", $ArtifactsLocation, "/DestKey:$StorageAccountKey", "/S", "/Y", "/Z:$env:LocalAppData\Microsoft\Azure\AzCopy\$ResourceGroupName"
-    if ($LASTEXITCODE -ne 0) { return }
-
-    # Generate the value for artifacts location SAS token if it is not provided in the parameter file
-    $ArtifactsLocationSasToken = $OptionalParameters[$ArtifactsLocationSasTokenName]
-    if ($ArtifactsLocationSasToken -eq $null) {
-        # Create a SAS token for the storage container - this gives temporary read-only access to the container
-        $ArtifactsLocationSasToken = New-AzureStorageContainerSASToken -Container $StorageContainerName -Context $StorageAccountContext -Permission r -ExpiryTime (Get-Date).AddHours(4)
-        $ArtifactsLocationSasToken = ConvertTo-SecureString $ArtifactsLocationSasToken -AsPlainText -Force
-        $OptionalParameters[$ArtifactsLocationSasTokenName] = $ArtifactsLocationSasToken
-    }
-}
-
-# Create or update the resource group using the specified template file and template parameters file
-New-AzureRmResourceGroup -Name $ResourceGroupName -Location $ResourceGroupLocation -Verbose -Force -ErrorAction Stop 
-
-New-AzureRmResourceGroupDeployment -Name ((Get-ChildItem $TemplateFile).BaseName + '-' + ((Get-Date).ToUniversalTime()).ToString('MMdd-HHmm')) `
-                                   -ResourceGroupName $ResourceGroupName `
-                                   -TemplateFile $TemplateFile `
-                                   -TemplateParameterFile $TemplateParametersFile `
-                                   @OptionalParameters `
-                                   -Force -Verbose
+$storageAccountKey = (Get-AzureRmStorageAccountKey -ResourceGroupName ravAzureRG1 -Name ravwdstorage2).Key1
+$storageCtx = (Get-AzureRmStorageAccount -ResourceGroupName ravAzureRG1 -Name ravwdstorage2).Context
+$sasToken = New-AzureStorageContainerSASToken -Container "packages" -Context $storageCtx -Permission r
+$sasToken = ConvertTo-SecureString $sasToken -AsPlainText -Force
+New-AzureRmResourceGroupDeployment -Name ravcddep -hostingPlanName ravhp4444 -TemplateFile "C:\Projects\AzureResourceGroup6\AzureResourceGroup6\Templates\WebSite.json" -ResourceGroupName ravAzureRG1 -_artifactsLocationSasToken $sasToken -_artifactsLocation https://ravwdstorage2.blob.core.windows.net/packages/WebApplication1.zip
